@@ -21,7 +21,7 @@ struct ConfirmLaunchView: View {
 
             // Summary
             Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 16, verticalSpacing: 10) {
-                summaryRow("Capture Device", state.selectedDevice?.localizedName ?? "—")
+                summaryRow("Capture Device", state.selectedDeviceDisplayName)
                 summaryRow("Detection Region",
                     String(format: "X %.0f%%  Y %.0f%%  W %.0f%%  H %.0f%%",
                            state.roiRect.minX * 100, state.roiRect.minY * 100,

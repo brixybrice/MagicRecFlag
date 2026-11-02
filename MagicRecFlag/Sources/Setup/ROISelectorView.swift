@@ -46,10 +46,14 @@ struct ROISelectorView: View {
         .padding(24)
         .onAppear {
             print("[ROI] selectedDLDevice: \(state.selectedDLDevice?.name ?? "nil")")
+            print("[ROI] selectedNDISource: \(state.selectedNDISource?.name ?? "nil")")
             print("[ROI] selectedAVDevice: \(state.selectedDevice?.localizedName ?? "nil")")
             if let dl = state.selectedDLDevice {
                 print("[ROI] → startDeckLink: \(dl.name)")
                 preview.startDeckLink(device: dl)
+            } else if let ndi = state.selectedNDISource {
+                print("[ROI] → startNDI: \(ndi.name)")
+                preview.startNDI(source: ndi)
             } else if let av = state.selectedDevice {
                 print("[ROI] → startAVFoundation: \(av.localizedName)")
                 preview.startAVFoundation(device: av)
@@ -62,9 +66,9 @@ struct ROISelectorView: View {
 
     @ViewBuilder
     private var previewView: some View {
-        if preview.isDeckLink {
-            // DeckLink: render frames as NSImage
-            if let img = preview.dlPreviewImage {
+        if let waitingText = preview.frameSourceWaitingText {
+            // DeckLink / NDI: render frames as NSImage
+            if let img = preview.framePreviewImage {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -75,7 +79,7 @@ struct ROISelectorView: View {
                     Color.black
                     VStack(spacing: 8) {
                         ProgressView()
-                        Text("Waiting for DeckLink signal…")
+                        Text(waitingText)
                             .font(.caption).foregroundColor(.secondary)
                     }
                 }
@@ -241,20 +245,23 @@ final class PreviewCaptureSession: NSObject, ObservableObject,
     private let avQueue  = DispatchQueue(label: "preview.av.frames")
     private var avFrameCount = 0
 
-    // DeckLink
-    private var dlCaptureSession: DLCaptureSession?
+    // DeckLink / NDI — frames delivered as pixel buffers, rendered as NSImage
+    private var dlCaptureSession:  DLCaptureSession?
+    private var ndiCaptureSession: NDICaptureSession?
     private let ciContext  = CIContext()
     private var frameCount = 0
 
-    @Published var isDeckLink:      Bool     = false
-    @Published var dlPreviewImage:  NSImage? = nil
+    /// Non-nil while previewing a DeckLink or NDI source (no AVCaptureSession);
+    /// shown until the first frame arrives.
+    @Published var frameSourceWaitingText: String?  = nil
+    @Published var framePreviewImage:      NSImage? = nil
 
     override init() { super.init() }
 
     // MARK: AVFoundation start
 
     func startAVFoundation(device: AVCaptureDevice) {
-        isDeckLink = false
+        frameSourceWaitingText = nil
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         print("[Preview/AV] auth status: \(status.rawValue) (0=notDetermined 1=restricted 2=denied 3=authorized)")
 
@@ -296,21 +303,34 @@ final class PreviewCaptureSession: NSObject, ObservableObject,
     // MARK: DeckLink start
 
     func startDeckLink(device: DLDevice) {
-        isDeckLink = true
+        frameSourceWaitingText = "Waiting for DeckLink signal…"
         guard let cap = DLCaptureSession(device: device) else {
             print("[Preview] Could not create DLCaptureSession")
             return
         }
         dlCaptureSession = cap
-        cap.start { [weak self] pixelBuffer in
-            guard let self else { return }
-            self.frameCount += 1
-            guard self.frameCount % 2 == 0 else { return }   // ~15 fps is enough for setup
-            let ci = CIImage(cvPixelBuffer: pixelBuffer)
-            guard let cg = self.ciContext.createCGImage(ci, from: ci.extent) else { return }
-            let img = NSImage(cgImage: cg, size: .zero)
-            DispatchQueue.main.async { self.dlPreviewImage = img }
+        cap.start { [weak self] pixelBuffer in self?.showFrame(pixelBuffer) }
+    }
+
+    // MARK: NDI start
+
+    func startNDI(source: NDISource) {
+        frameSourceWaitingText = "Waiting for NDI source “\(source.name)”…"
+        guard let cap = NDICaptureSession(source: source) else {
+            print("[Preview] Could not create NDICaptureSession")
+            return
         }
+        ndiCaptureSession = cap
+        cap.start { [weak self] pixelBuffer in self?.showFrame(pixelBuffer) }
+    }
+
+    private func showFrame(_ pixelBuffer: CVPixelBuffer) {
+        frameCount += 1
+        guard frameCount % 2 == 0 else { return }   // ~15 fps is enough for setup
+        let ci = CIImage(cvPixelBuffer: pixelBuffer)
+        guard let cg = ciContext.createCGImage(ci, from: ci.extent) else { return }
+        let img = NSImage(cgImage: cg, size: .zero)
+        DispatchQueue.main.async { self.framePreviewImage = img }
     }
 
     // MARK: Stop
@@ -319,6 +339,8 @@ final class PreviewCaptureSession: NSObject, ObservableObject,
         avSession.stopRunning()
         dlCaptureSession?.stop()
         dlCaptureSession = nil
-        isDeckLink = false
+        ndiCaptureSession?.stop()
+        ndiCaptureSession = nil
+        frameSourceWaitingText = nil
     }
 }

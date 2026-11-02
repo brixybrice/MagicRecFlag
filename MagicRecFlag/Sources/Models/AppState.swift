@@ -15,10 +15,16 @@ final class AppState: ObservableObject {
     /// Set when the user picks a native DeckLink device.
     @Published var selectedDLDevice: DLDevice? = nil
 
-    var hasSelectedDevice: Bool { selectedDevice != nil || selectedDLDevice != nil }
+    /// Set when the user picks an NDI source received natively over the network.
+    @Published var selectedNDISource: NDISource? = nil
+
+    var hasSelectedDevice: Bool {
+        selectedDevice != nil || selectedDLDevice != nil || selectedNDISource != nil
+    }
 
     var selectedDeviceDisplayName: String {
-        selectedDevice?.localizedName ?? selectedDLDevice?.name ?? "None selected"
+        selectedDevice?.localizedName ?? selectedDLDevice?.name
+            ?? selectedNDISource?.name ?? "None selected"
     }
 
     // MARK: – Setup configuration
@@ -59,6 +65,9 @@ final class AppState: ObservableObject {
         if let dl = selectedDLDevice {
             d.set("decklink",  forKey: "selectedDeviceType")
             d.set(dl.name,     forKey: "selectedDLDeviceName")
+        } else if let ndi = selectedNDISource {
+            d.set("ndi",     forKey: "selectedDeviceType")
+            d.set(ndi.name,  forKey: "selectedNDISourceName")
         } else if let av = selectedDevice {
             d.set("avfoundation",  forKey: "selectedDeviceType")
             d.set(av.uniqueID,     forKey: "selectedDeviceID")
@@ -101,6 +110,13 @@ final class AppState: ObservableObject {
                DLDeviceEnumerator.isAvailable() {
                 selectedDLDevice = DLDeviceEnumerator.availableDevices()
                     .first { $0.name == name }
+            }
+        } else if deviceType == "ndi" {
+            // NDI connects by name, so no discovery round-trip is needed here;
+            // the receiver simply waits until the source is on the network.
+            if let name = d.string(forKey: "selectedNDISourceName"),
+               NDISourceFinder.isAvailable() {
+                selectedNDISource = NDISource(name: name)
             }
         } else {
             if let uid = d.string(forKey: "selectedDeviceID") {
