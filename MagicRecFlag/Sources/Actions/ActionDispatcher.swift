@@ -9,12 +9,16 @@ final class ActionDispatcher {
     // MARK: – Public triggers
 
     func triggerRecord() {
+        NSLog("[ActionDispatcher] REC detected — sending Record shortcut %@",
+              AppState.shared.recordHotkey.displayString)
         AppState.shared.isRecording = true
         HUDWindowController.shared.setState(.recording)
         performAction(hotkey: AppState.shared.recordHotkey)
     }
 
     func triggerStop() {
+        NSLog("[ActionDispatcher] STBY detected — sending Stop shortcut %@",
+              AppState.shared.stopHotkey.displayString)
         AppState.shared.isRecording = false
         HUDWindowController.shared.setState(.standby)
         performAction(hotkey: AppState.shared.stopHotkey)
@@ -32,41 +36,58 @@ final class ActionDispatcher {
 
         NSWorkspace.shared.openApplication(at: url, configuration: config) { [weak self] app, error in
             if let error = error {
-                print("[ActionDispatcher] Could not open app: \(error)")
+                NSLog("[ActionDispatcher] Could not open %@: %@", url.path, "\(error)")
+                HUDWindowController.shared.reportShortcutFailure("Could not open \(url.lastPathComponent)")
                 return
             }
-            // 2. Short delay to let the app come to front, then send key
+            // 2. Short delay to let the app settle, then send the key to it
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                self?.sendKeyEvent(hotkey: hotkey)
+                self?.sendKeyEvent(hotkey: hotkey, to: app)
             }
         }
     }
 
     // MARK: – CGEvent keyboard injection
 
-    private func sendKeyEvent(hotkey: HotkeyDefinition) {
+    /// Sends the shortcut straight to the target process when it is known.
+    /// Posting to the HID tap only reaches whichever app is frontmost, and a
+    /// background (menu bar) app cannot rely on bringing the recorder to front.
+    private func sendKeyEvent(hotkey: HotkeyDefinition, to app: NSRunningApplication?) {
         guard hotkey.isValid else { return }
 
         guard AXIsProcessTrusted() else {
-            print("[ActionDispatcher] Accessibility not granted — cannot inject keystrokes.")
+            NSLog("[ActionDispatcher] Accessibility not granted — shortcut NOT sent")
+            HUDWindowController.shared.reportShortcutFailure("Accessibility access needed")
             return
         }
+        let pid = app?.processIdentifier
+        NSLog("[ActionDispatcher] posting %@ to %@ (pid %d); frontmost: %@",
+              hotkey.displayString, app?.localizedName ?? "HID tap", pid ?? -1,
+              NSWorkspace.shared.frontmostApplication?.localizedName ?? "?")
 
         let flags = cgFlags(from: hotkey.modifiers)
+        let post: (CGEvent) -> Void = { event in
+            event.flags = flags
+            if let pid { event.postToPid(pid) } else { event.post(tap: .cghidEventTap) }
+        }
 
         // Key down
         if let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: hotkey.keyCode, keyDown: true) {
-            keyDown.flags = flags
-            keyDown.post(tap: .cghidEventTap)
+            post(keyDown)
         }
 
         // Key up (small delay)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             if let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: hotkey.keyCode, keyDown: false) {
-                keyUp.flags = flags
-                keyUp.post(tap: .cghidEventTap)
+                post(keyUp)
             }
         }
+    }
+
+    /// Opens System Settings → Privacy & Security → Accessibility.
+    static func openAccessibilitySettings() {
+        let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+        NSWorkspace.shared.open(URL(string: url)!)
     }
 
     // MARK: – Modifier flag conversion

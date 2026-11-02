@@ -123,9 +123,8 @@ struct SetupContainerView: View {
     private func launchLiveMode() {
         state.saveToDefaults()
         state.isLiveMode = true
+        // Hides (not closes) the setup window; it is restored when live mode stops
         HUDWindowController.shared.show()
         CaptureEngine.shared.start()
-        // Hide (not close) so we can restore it when the user stops live mode
-        NSApp.windows.first { !($0 is NSPanel) }?.orderOut(nil)
     }
 }

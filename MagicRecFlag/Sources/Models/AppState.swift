@@ -39,6 +39,9 @@ final class AppState: ObservableObject {
 
     @Published var isLiveMode: Bool = false
     @Published var isRecording: Bool = false
+    /// Live mode always shows STBY / REC in the menu bar; this adds the floating
+    /// badge, which stays visible when a full-screen app hides the menu bar.
+    @Published var showFloatingBadge: Bool = false
 
     // MARK: – Detection tuning
 
@@ -98,6 +101,9 @@ final class AppState: ObservableObject {
         d.set(redHueWidth,    forKey: "redHueWidth")
         d.set(minSaturation,  forKey: "minSaturation")
         d.set(minBrightness,  forKey: "minBrightness")
+
+        // Live mode
+        d.set(showFloatingBadge, forKey: "showFloatingBadge")
     }
 
     func loadFromDefaults() {
@@ -169,6 +175,9 @@ final class AppState: ObservableObject {
         if d.object(forKey: "redHueWidth")   != nil { redHueWidth   = d.double(forKey: "redHueWidth") }
         if d.object(forKey: "minSaturation") != nil { minSaturation = d.double(forKey: "minSaturation") }
         if d.object(forKey: "minBrightness") != nil { minBrightness = d.double(forKey: "minBrightness") }
+
+        // Live mode
+        showFloatingBadge = d.bool(forKey: "showFloatingBadge")
     }
 }
 
